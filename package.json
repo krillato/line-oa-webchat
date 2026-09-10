@@ -3,15 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3100",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tunnel": "ngrok http 3100"
   },
   "dependencies": {
+    "@line/bot-sdk": "^11.2.0",
     "next": "16.3.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "redis": "^6.2.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
