@@ -1,7 +1,22 @@
 import type { ChatMessage } from "@/lib/types";
+import { stickerThumbnailUrl } from "@/lib/stickers";
 
 export default function MessageBubble({ message }: { message: ChatMessage }) {
   const isOut = message.direction === "out";
+
+  if (message.kind === "sticker") {
+    return (
+      <div className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={stickerThumbnailUrl(message.stickerId)}
+          alt="sticker"
+          className="h-24 w-24 object-contain"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
       <div

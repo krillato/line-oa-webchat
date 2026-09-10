@@ -48,7 +48,8 @@ line-oa-webchat/
 │   └── lib/
 │       ├── line.ts                             # wrapper เรียก LINE Messaging API
 │       ├── kv.ts                                # wrapper อ่าน/เขียน Redis
-│       └── types.ts                            # ChatMessage, ChatUser types
+│       ├── types.ts                            # ChatMessage (text | sticker), ChatUser types
+│       └── stickers.ts                         # รายการสติ๊กเกอร์ตัวอย่างที่เลือกส่งได้ + helper สร้าง URL รูป
 │
 ├── public/                                     # static assets (icon ฯลฯ)
 ├── .env.local.example                          # ตัวอย่างตัวแปร env ที่ต้องตั้ง
@@ -78,10 +79,10 @@ LINE server ยิง POST → /api/webhook
 verifyLineSignature()  ← ตรวจ x-line-signature ด้วย LINE_CHANNEL_SECRET
         │ (ผ่าน)
         ▼
-อ่าน event → ถ้าเป็นข้อความ text จาก user:
+อ่าน event → ถ้าเป็นข้อความ type "text" หรือ "sticker" จาก user (type อื่น เช่น รูป/วิดีโอ จะถูกข้าม):
     - getLineProfile(userId)  → ดึงชื่อ/รูปโปรไฟล์
     - upsertUser()            → บันทึก/อัปเดต user ใน Redis
-    - addMessage()             → บันทึกข้อความ (direction: "in") ใน Redis
+    - addMessage()             → บันทึกข้อความ (kind: "text" หรือ "sticker", direction: "in") ใน Redis
         │
         ▼
 ตอบ LINE server 200 OK
@@ -97,20 +98,22 @@ page.tsx  → poll GET /api/users ทุก 3 วิ → แสดงราย�
 ### 3) ส่งข้อความจาก Webchat (Outbound)
 
 ```
-พิมพ์ในช่อง input → กดส่ง
+พิมพ์ในช่อง input → กดส่ง                    หรือ  กดปุ่ม 😊 → เลือกสติ๊กเกอร์
+        │                                              │
+        ▼                                              ▼
+POST /api/messages/send  { userId, kind: "text", text }   หรือ  { userId, kind: "sticker", packageId, stickerId }
         │
         ▼
-POST /api/messages/send  { userId, text }
-        │
-        ▼
-pushTextMessage()  → เรียก LINE push message API ด้วย LINE_CHANNEL_ACCESS_TOKEN
+pushTextMessage() / pushStickerMessage()  → เรียก LINE push message API ด้วย LINE_CHANNEL_ACCESS_TOKEN
         │
         ▼
 addMessage()  → บันทึกข้อความ (direction: "out") ใน Redis
         │
         ▼
-ข้อความไปโผล่ในแอป LINE ของ user คนนั้น
+ข้อความ/สติ๊กเกอร์ไปโผล่ในแอป LINE ของ user คนนั้น
 ```
+
+**สติ๊กเกอร์:** เลือกส่งได้จากชุดตัวอย่างที่กำหนดไว้ล่วงหน้าใน `src/lib/stickers.ts` (`STICKER_PICKS`) — ใช้ sticker package ที่เป็น official/free ของ LINE (packageId `446`) ยิงผ่าน Messaging API ได้โดยไม่ต้องขอสิทธิ์เพิ่ม รูปสติ๊กเกอร์โหลดตรงจาก LINE CDN ทั้งตอนเลือกและตอนแสดงผล ไม่ผ่าน server เราเลย จึงแทบไม่เพิ่มภาระให้ server (ดูรายการสติ๊กเกอร์อื่นเพิ่มได้ที่ [LINE's sticker list](https://developers.line.biz/en/docs/messaging-api/sticker-list/) แล้วแก้ค่าใน `stickers.ts`)
 
 ### โครงสร้างข้อมูลใน Redis
 
@@ -118,7 +121,49 @@ addMessage()  → บันทึกข้อความ (direction: "out") ใ
 |---|---|---|
 | `users` | Sorted Set | รายชื่อ userId ทั้งหมด, score = เวลาข้อความล่าสุด (ใช้เรียงลำดับ sidebar) |
 | `user:{userId}` | Hash | `displayName`, `pictureUrl` ของ user คนนั้น |
-| `messages:{userId}` | List | ข้อความทั้งหมดของ user คนนั้น (JSON string เรียงตามเวลา) |
+| `messages:{userId}` | List | ข้อความทั้งหมดของ user คนนั้น (JSON string เรียงตามเวลา) — แต่ละอันมี `kind: "text"` (มี field `text`) หรือ `kind: "sticker"` (มี field `packageId`, `stickerId`) |
+
+---
+
+## ดูข้อมูลที่เก็บใน Redis (debug)
+
+### วิธีที่แนะนำ: RedisInsight (GUI) ผ่านเว็บของผู้ให้บริการ Redis
+เข้า dashboard ของผู้ให้บริการ Redis (เช่น Redis Cloud ที่ https://cloud.redis.io) → เข้า database ที่ใช้อยู่ → เปิด **RedisInsight** จากในหน้านั้น จะเห็นทุก key แบบ browse ได้เลย ไม่ต้องตั้งค่าเชื่อมต่อเอง (ถ้า login เว็บมีปัญหา ใช้ RedisInsight Desktop App แทนได้ — ดาวน์โหลดที่ https://redis.io/insight/ แล้ว connect manually ด้วยค่าจาก `REDIS_URL` ใน `.env.local`)
+
+### วิธีสำรอง: debug endpoint ในโปรเจกต์ (รันบน local เท่านั้น)
+ถ้าต้องการดูเร็ว ๆ ผ่าน browser โดยไม่ต้อง login ที่ไหนเลย สร้างไฟล์ `src/app/api/debug/route.ts` ชั่วคราว:
+
+```ts
+import { getMessages, getUsers } from "@/lib/kv";
+
+export async function GET() {
+  const users = await getUsers();
+  const usersWithMessages = await Promise.all(
+    users.map(async (user) => ({
+      ...user,
+      messages: await getMessages(user.userId),
+    }))
+  );
+
+  return new Response(JSON.stringify(usersWithMessages, null, 2), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+```
+
+รัน `pnpm dev` แล้วเปิด `http://localhost:3100/api/debug` ในเบราว์เซอร์ จะเห็น user ทุกคนพร้อมข้อความแชทซ้อนอยู่ในแต่ละคน
+
+**สำคัญ:** endpoint นี้ไม่มี authentication ห้าม commit/push/deploy ขึ้น production เด็ดขาด (ใครก็ตามที่รู้ URL จะเห็นข้อมูลผู้ใช้ทั้งหมด) — ใช้แค่รันบน local ระหว่าง debug แล้วลบไฟล์ทิ้งทันทีหลังใช้เสร็จ
+
+### วิธีสำรอง: `redis-cli` ผ่าน terminal
+```bash
+brew install redis
+redis-cli -u "$REDIS_URL"
+# ตัวอย่างคำสั่งดูข้อมูล
+KEYS *
+HGETALL user:<userId>
+LRANGE messages:<userId> 0 -1
+```
 
 ---
 
@@ -227,3 +272,9 @@ ngrok config add-authtoken <token จาก ngrok.com>
 - สร้าง GitHub repository (public) แล้ว push โค้ด
 - Import project เข้า Vercel → ตั้ง Environment Variables เดียวกับ `.env.local`
 - Deploy → เอา URL production ไปตั้งเป็น Webhook URL แทน ngrok ใน LINE Console (เลิกใช้ ngrok ได้ตั้งแต่จุดนี้)
+
+### 16. Debug ข้อมูลใน Redis ตอนแก้ deploy error
+ตอน deploy ครั้งแรกเจอ `500 Internal Server Error` เพราะ `REDIS_URL` ที่ตั้งใน Vercel มีเครื่องหมาย `"` ติดไปด้วย (copy มาจาก `.env.local` ที่เขียนแบบ `KEY="value"` ซึ่ง Next.js ฝั่ง local ตัด quote ให้อัตโนมัติ แต่ Vercel ไม่ตัดให้) แก้โดยลบ `"` ออกจากค่าใน Vercel Environment Variables แล้ว Redeploy ใหม่ — ระหว่างวินิจฉัยปัญหาได้ทำ `src/app/api/debug/route.ts` (dump ข้อมูล user+ข้อความทั้งหมดจาก Redis เป็น JSON) ไว้ดูผ่าน `http://localhost:3100/api/debug` ชั่วคราว **ไม่ push/deploy ขึ้น production** (ไม่มี authentication ป้องกัน) ลบทิ้งหลังใช้เสร็จ
+
+### 17. เพิ่ม sticker support
+ขยาย `ChatMessage` เป็น discriminated union (`kind: "text" | "sticker"`) → เพิ่ม `pushStickerMessage()` ใน `lib/line.ts`, จัดการ `event.message.type === "sticker"` ใน webhook, ให้ `/api/messages/send` รับ payload ทั้งสองแบบ, เพิ่ม sticker picker (ปุ่ม 😊) ใน `ChatWindow.tsx` และ render สติ๊กเกอร์เป็นรูปใน `MessageBubble.tsx` — ทดสอบส่งจริงผ่าน LINE Push API สำเร็จ (200 OK, รูปโหลดถูกต้องทุกอัน)

@@ -17,6 +17,13 @@ export async function pushTextMessage(userId: string, text: string) {
   });
 }
 
+export async function pushStickerMessage(userId: string, packageId: string, stickerId: string) {
+  await lineClient.pushMessage({
+    to: userId,
+    messages: [{ type: "sticker", packageId, stickerId }],
+  });
+}
+
 export async function getLineProfile(userId: string) {
   return lineClient.getProfile(userId);
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/types";
+import { STICKER_PICKS, stickerThumbnailUrl } from "@/lib/stickers";
 import MessageBubble from "./MessageBubble";
 
 export default function ChatWindow({
@@ -14,6 +15,7 @@ export default function ChatWindow({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [showStickers, setShowStickers] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,11 +50,38 @@ export default function ChatWindow({
       await fetch("/api/messages/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, text }),
+        body: JSON.stringify({ userId, kind: "text", text }),
       });
       setMessages((prev) => [
         ...prev,
-        { id: `local-${Date.now()}`, userId, text, direction: "out", timestamp: Date.now() },
+        { id: `local-${Date.now()}`, userId, direction: "out", timestamp: Date.now(), kind: "text", text },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleSendSticker(packageId: string, stickerId: string) {
+    if (sending) return;
+    setSending(true);
+    setShowStickers(false);
+    try {
+      await fetch("/api/messages/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, kind: "sticker", packageId, stickerId }),
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-${Date.now()}`,
+          userId,
+          direction: "out",
+          timestamp: Date.now(),
+          kind: "sticker",
+          packageId,
+          stickerId,
+        },
       ]);
     } finally {
       setSending(false);
@@ -72,7 +101,30 @@ export default function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
+      {showStickers && (
+        <div className="grid grid-cols-8 gap-2 border-t border-zinc-800 p-3">
+          {STICKER_PICKS.map((s) => (
+            <button
+              key={s.stickerId}
+              onClick={() => handleSendSticker(s.packageId, s.stickerId)}
+              disabled={sending}
+              className="rounded-lg p-1 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={stickerThumbnailUrl(s.stickerId)} alt="sticker" className="h-10 w-10 object-contain" />
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2 border-t border-zinc-800 p-3">
+        <button
+          onClick={() => setShowStickers((v) => !v)}
+          className={`rounded-full px-3 py-2 text-lg ${showStickers ? "bg-zinc-700" : "hover:bg-zinc-800"}`}
+          title="สติ๊กเกอร์"
+        >
+          😊
+        </button>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
